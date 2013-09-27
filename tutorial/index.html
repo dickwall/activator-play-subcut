@@ -1,0 +1,178 @@
+<html>
+<head>
+    <title>
+        Template Template - Activator Template
+    </title>
+</head>
+<body>
+<div>
+    <h2>
+        Play with Dependency Injection and SubCut 
+    </h2>
+    <p>
+        <a href="http://en.wikipedia.org/wiki/Dependency_injection" target="_blank">Dependency injection</a> is a design
+        pattern that frees your code from creational concerns, making your code cleaner and easier to test.
+    </p>
+    <p>
+        This tutorial demonstrates dependency injection using SubCut and testing using Scalatest in
+        a simple Play application.
+        <a href="https://github.com/dickwall/subcut/blob/master/GettingStarted.md" target="_blank">SubCut</a>
+        takes advantage of Scala's type system for dependency injection making it
+        an easy, lightweight and type-safe way to inject your dependencies.
+    </p>
+    <p>
+        This tutorial will take about 10 minutes to complete and assumes that you are already familiar with the basics
+        of a Play application.
+    </p>
+</div>
+<div>
+    <h2>
+        Injecting the Application
+    </h2>
+    <p>First, take a look at the
+        <a href="#code/app/controllers/Application.scala" class="shortcut">Application</a> class. You should
+        notice that a new parametric field has been added to the class, called
+        <code>bindingModule</code> and of type <code>BindingModule</code>, it is also
+        marked as <code>implicit</code> which means the Scala compiler can automatically
+        fill it in if a <code>BindingModule</code> type is required by some other method
+        or new class instance.
+    </p>
+    <p>The class has also had the Injectable trait added to it, this allows configured bound instances to
+    be automatically injected upon creation of a new instance of the class. The line 
+    <pre><code>val textGenerator = inject[TextGenerator]</code></pre> achieves this, but you can already make an improvement to this code.
+    This form of injection will fail if no TextInjector has been configured in the bindings you are using,
+    but if you change the injection to:
+    <pre><code>injectOptional[TextGenerator] getOrElse new WelcomeTextGenerator</code></pre>
+    instead, then SubCut will use the configured TextGenerator if bound, or fall back on the default
+    WelcomeTextGenerator if not. 
+    </p>
+    <p>This is safer at runtime and also makes it easy to see what the "standard"
+    definition for the TextGenerator is in normal usage, rather than having to dig through configuration files
+    to see what is used in the typical case.
+    </p>
+</div>
+<div>
+    <h2>
+       TextGenerator
+    </h2>
+    <p>
+        <a href="#code/app/services/TextGenerator.scala" class="shortcut">TextGenerator</a> 
+        is an abstract class and we have a concrete implementation of it in the form of
+        <a href="#code/app/services/TextGenerator.scala" class="shortcut">WelcomeTextGenerator</a>
+        which is our standard implementation.
+    </p>
+    <p>
+        TextGenerator is a rudimentary service that simply generates text. You'll have more useful
+        services in your code e.g. a repository service that is backed by a concrete class to communicate with a
+        database. By using dependency injection we can configure the type of service required outside of the class that
+        needs to call on it.
+    </p>
+    <p>
+        To make things a little bit more interesting, we have an embedded dependency inside of WelcomeTextGenerator
+        called <code>welcomeText</code> of type <a href="#code/app/services/TextGenerator.scala" class="shortcut">Greeting</a>.
+        This requires WelcomeTextGenerator to also be injectable, which means it also needs the implicit bindingModule defined.
+        Then the Greeting instance configured is injected as well. This injection already uses the safer injectOptional form
+        so that if a configured binding cannot be found at runtime, it will use the default instead. It then gets the value from
+        inside that Greeting as the String to welcome people to the site.
+    </p>
+</div>
+<div>
+    <h2>
+        Bindings and Configuration
+    </h2>
+    <p>
+        The configuration for the injected items is defined in the
+        <a href="#code/app/config/StandardBindings.scala" class="shortcut">StandardBindings</a> object which
+        extends <code>NewBindingModule</code>. Within the constructor code (which is actually a function of MutableBindingModule
+        to Unit), bindings are made using a simple DSL. When the function has been used by the constructor
+        the Mutability is removed, so the resulting BindingModule is immutable (and thread safe).
+    </p>
+    <p>
+        The line <code>import module._</code> makes it more convenient to make the bindings as you are able to say
+        <code>bind [Type] ...</code> instead of <code>module.bind [Type] ...</code>.
+    </p>
+    <p>
+        The first binding provides a single instance that will always be used when a Greeting is required. Greeting
+        is a simple leaf class (i.e. not injected itself) so we just make a new Greeting and bind it to the Greeting
+        type. Note that it is perfectly valid to bind a type to an instance of the same type, it does not have to be
+        a subtype (so you can bind any instance of a class to the type of that class if it makes sense).
+    </p>
+    <p>
+        The second binding is for <code>TextGenerator</code> and provides a <code>WelcomeTextGenerator</code> instance.
+        <code>WelcomeTextGenerator</code> is itself injected, so we need to carry the binding module through to it as well.
+        Because modules can be updated (they are immutable, but can be copied and updated to new bindings in the copying
+        resulting in a new immutable binding module but with a different configuration) we use the <code>toModuleSingle</code>
+        binding, which makes the current module (whatever it is) available to the class you are creating. It is marked
+        implicit so that the call to new will pick up the binding module automatically, but you could also remove the
+        implicit module and use placeholder syntax to pass the module through to the new instance explicitly. Give it
+        a go by replacing that binding line with the following code:
+        <pre><code>bind [TextGenerator] toModuleSingle { new WelcomeTextGenerator()(_) }</code></pre> and save the file to
+        test that everything still works.
+    </p>
+</div>
+<div>
+    <h2>
+        Testing with SubCut and ScalaTest
+    </h2>
+    <p>
+        Now take a look at <a href="#code/test/controllers/ApplicationTest.scala" class="shortcut">ApplicationTest</a>.
+        In this test, we are going to use a mock to verify that a request for the welcome page to the Application
+        does invoke the welcomeText method on the TextGenerator. In order to do this we create a mock TextGenerator 
+        instance and then bind it in for the TextGenerator for the purposes of the test.
+    </p>
+    <p>
+        <code>StandardBindings.modifyBindings { implicit module =></code> takes the StandardBindings we have for
+        the project and provides you with a copy of the bindings that you can modify. This lets you re-bind
+        some of the types to provide alternative implementations than the standard ones. In this case we
+        bind the mocked textGenerator instance in for TextGenerator so that it will use our mock instead.
+    </p>
+    <p>
+        Creating the Application instance with new now uses our modified test bindings, and when we make
+        a fake page request, it calls through to the TextGenerator which uses the mock. At the end of the
+        test we verify that welcomeText was called in the mock.
+    </p>
+    <p>
+        Modifying SubCut bindings in tests is completely thread-safe, each modification gets its own copy
+        of the bindings so they do not interfere with one another. This means all tests can be run in parallel,
+        mocking out different parts of the system or just re-configuring bindings for that test, and it will
+        not affect any of the other tests running at the same time.
+    </p>
+</div>
+<div>
+    <h2>
+        Integrating with Play
+    </h2>
+    <p>
+      The final part to using SubCut with Play is to integrate the injection into the play lifecycle. Since
+      the <code>Application</code> class is now injected and takes a bindingModule as a constructor parameter
+      we will need to provide that bindingModule when play gets a new Controller instance (e.g. Application).
+    </p>
+    <p>
+      Look at <a href="#code/app/Global.scala" class="shortcut">Global</a> to see how this is accomplished.
+      The standard implementation of GlobalSettings in play uses reflection to create an instance of a new
+      controller class, but only works if the Controller has a default (no-parameter) constructor. We need
+      to override the implementation of the <code>getControllerInstance</code> method and add the ability
+      to fill in the StandardBindings.
+    </p>
+    <p>
+      The least invasive way to do this is to attempt to create the instance with the default constructor
+      first (some of our controllers may not be injected and will still have a default constructor) and
+      if that fails, try and use the constructor that takes a <code>BindingModule</code> instead. This is
+      what the code you see here does - if the newInstance for a default constructor fails with a
+      <code>ReflectionException</code> then try and look up the BindingModule constructor - if it is there
+      we can use it, and if not we get the same kind of ReflectionException we would have got before.
+    </p>
+    <p>
+      Once we have the constructor we can pass in the StandardBindings (which will be the configuration we
+      use for production) to the new instance. This is then implicitly passed down to all children of that
+      class if needed, and to their children, and so on. This is the Scala feature that SubCut uses to
+      pass the configuration down to any class that needs it - you just have to make sure that there is
+      an unbroken chain of the implicit BindingModule parameter down to the classes that need them, and
+      the Scala compiler helps with that.
+    </p>
+</div> 
+    
+
+</body>
+</html>
+                                                                                                                                            1,1           Top
